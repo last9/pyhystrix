@@ -1,0 +1,411 @@
+import os
+import unittest
+import time
+import requests
+import random
+from urllib3.connection import HTTPConnection
+from urllib3.exceptions import ConnectTimeoutError
+from requests.exceptions import ConnectionError
+from httmock import all_requests, HTTMock
+
+import pyhystrix
+import circuit_breaker
+from pyhystrix import CONFIG
+
+DEFAULT_FAILS = 3
+DEFAULT_RETRY = 1
+DEFAULT_OPEN_CIRCUIT_THREASHOLD = 5
+
+
+def validation_stub(number):
+    return number > 0
+
+
+def raises_something(exc):
+    raise exc
+
+
+class CustomFailureMock(object):
+    """patching _new_conn method of HTTPConnection
+    to mock real external http call.
+    """
+    def __init__(self, func):
+        self._func = func
+
+    def __enter__(self):
+        self._real_new_conn = HTTPConnection._new_conn
+        HTTPConnection._new_conn = self._func
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        HTTPConnection._new_conn = self._real_new_conn
+
+
+class TestTimeouts(unittest.TestCase):
+    def setUp(self):
+        pyhystrix.Init()
+
+    def test_default_connect_timeout(self):
+        now = int(time.time())
+        after = now
+        try:
+            requests.get("http://google.com:488", retries=0)
+        except ConnectionError:
+            after = int(time.time())
+
+        time_diff = after - now
+        self.assertTrue(time_diff >= CONFIG.connect_timeout)
+
+
+class TestRetry(unittest.TestCase):
+    def setUp(self):
+        pyhystrix.Init()
+
+    def test_default_retry(self):
+        temp = {"retried": -1}
+
+        def _fake_new_conn(self):
+            temp["retried"] += 1
+            raise ConnectTimeoutError(self, "", (self.host,
+                                                 self.timeout))
+
+        with CustomFailureMock(_fake_new_conn):
+            url = "http://pyhystrixtest.com"
+            returnedError = None
+            try:
+                requests.get(url)
+            except ConnectionError:
+                returnedError = ConnectionError
+            self.assertEqual(returnedError, ConnectionError)
+            self.assertEqual(temp["retried"], CONFIG.max_tries)
+
+    def test_custom_retry(self):
+        temp = {"retried": -1}
+        retries = random.randrange(1, CONFIG.cb_fail_threshold, 1)
+
+        def _fake_new_conn(self):
+            temp["retried"] += 1
+            raise ConnectTimeoutError(self, "", (self.host,
+                                                 self.timeout))
+
+        with CustomFailureMock(_fake_new_conn):
+            url = "http://pyhystrixtest123.com"
+            returnedError = None
+            try:
+                requests.get(url, retries=retries)
+            except ConnectionError:
+                returnedError = ConnectionError
+            self.assertEqual(returnedError, ConnectionError)
+            self.assertEqual(temp["retried"], retries)
+
+    def test_no_retry(self):
+        temp = {"retried": -1}
+        retries = 0
+
+        def _fake_new_conn(self):
+            temp["retried"] += 1
+            raise ConnectTimeoutError(self, "", (self.host,
+                                                 self.timeout))
+
+        with CustomFailureMock(_fake_new_conn):
+            url = "http://pyhystrixtest123.com"
+            returnedError = None
+            try:
+                requests.get(url, retries=retries)
+            except ConnectionError:
+                returnedError = ConnectionError
+            self.assertEqual(returnedError, ConnectionError)
+            self.assertEqual(temp["retried"], 0)
+
+    def test_retry_only_for_retriable_exceptions(self):
+        temp = {"retried": -1}
+        retries = 2
+
+        def _fake_new_conn(self):
+            temp["retried"] += 1
+            raise KeyError("custom")
+
+        with CustomFailureMock(_fake_new_conn):
+            url = "http://pyhystrixtest123.com"
+            try:
+                requests.get(url, retries=retries)
+            except KeyError:
+                pass
+            self.assertEqual(temp["retried"], 0)
+
+    def tearDown(self):
+        pass
+
+
+class TestCircuitBreaking(unittest.TestCase):
+    def setUp(self):
+        pyhystrix.Init()
+
+    def test_default_circuitbreaking(self):
+        temp = {"retried": 0}
+        retries = CONFIG.cb_fail_threshold + 2
+
+        def _fake_new_conn(self):
+            temp["retried"] += 1
+            raise ConnectTimeoutError(self, "", (self.host,
+                                                 self.timeout))
+
+        with CustomFailureMock(_fake_new_conn):
+            url = "http://pyhystrixtest123.com"
+            returnedError = None
+            try:
+                requests.get(url, retries=retries)
+            except ConnectionError:
+                returnedError = ConnectionError
+            self.assertEqual(returnedError, ConnectionError)
+            self.assertEqual(temp["retried"], CONFIG.cb_fail_threshold)
+
+        time.sleep(CONFIG.cb_delay)
+        temp["retried"] = 0
+
+        with CustomFailureMock(_fake_new_conn):
+            url = "http://pyhystrixtest123.com"
+            returnedError = None
+            try:
+                requests.get(url, retries=retries)
+            except ConnectionError:
+                returnedError = ConnectionError
+            self.assertEqual(returnedError, ConnectionError)
+            self.assertEqual(temp["retried"], 1)
+
+    def test_custom_circuitbreaking(self):
+        custom_threshold = random.randrange(2, 4, 1)
+        custom_delay = 5
+        os.environ["PYH_CB_FAIL_THRESHOLD"] = str(custom_threshold)
+        os.environ["PYH_CB_DELAY"] = str(custom_delay)
+
+        pyhystrix.Init()
+
+        del os.environ["PYH_CB_FAIL_THRESHOLD"]
+        del os.environ["PYH_CB_DELAY"]
+
+        temp = {"retried": 0}
+        retries = custom_threshold + 2
+
+        def _fake_new_conn(self):
+            temp["retried"] += 1
+            raise ConnectTimeoutError(self, "", (self.host,
+                                                 self.timeout))
+
+        with CustomFailureMock(_fake_new_conn):
+            url = "http://pyhystrixtest123.com"
+            try:
+                requests.get(url, retries=retries)
+            except ConnectionError:
+                pass
+            self.assertEqual(temp["retried"], custom_threshold)
+
+        time.sleep(custom_delay)
+        temp["retried"] = 0
+
+        with CustomFailureMock(_fake_new_conn):
+            url = "http://pyhystrixtest123.com"
+            try:
+                requests.get(url, retries=retries)
+            except ConnectionError:
+                pass
+            self.assertEqual(temp["retried"], 1)
+
+    def test_circuit_half_open_after_alive_threshold(self):
+        temp = {"retried": 0}
+
+        def _fake_new_conn(self):
+            temp["retried"] += 1
+            raise ConnectTimeoutError(self, "", (self.host,
+                                                 self.timeout))
+
+        with CustomFailureMock(_fake_new_conn):
+            url = "http://pyhystrixtest123.com"
+            # Open the circuit
+            try:
+                requests.get(url, retries=CONFIG.cb_fail_threshold+2)
+            except ConnectionError:
+                pass
+            self.assertEqual(temp["retried"], CONFIG.cb_fail_threshold)
+
+            # reset the counter
+            temp["retried"] = 0
+            # Make requests on open circuit till the alive_threshold is reached
+            # and the circuit is half open
+            for i in xrange(CONFIG.cb_alive_threshold):
+                requests.get(url)
+                self.assertEqual(temp["retried"], 0)
+
+            try:
+                requests.get(url)
+            except ConnectionError:
+                pass
+            self.assertEqual(temp["retried"], 1)
+
+    def test_circuit_closed_on_success(self):
+        """Steps:
+        1. Open the circuit with failed calls. Even thought he retry count is
+           more that cb_failure_threshold, the actual call count only reaches
+           the cb_failure_threshold and no request is made on the closed
+           circuit
+        2. make the circuit half open by making failed calls on open circuit
+           to reach cb_fail_threshold
+        3. Make a success call on half open circuit to close it
+        4. make failed requests on closed circuit and check the count to
+           validate that the circuit was closed
+        """
+        temp = {"retried": 0}
+
+        def _fake_new_conn(self):
+            temp["retried"] += 1
+            raise ConnectTimeoutError(self, "", (self.host,
+                                                 self.timeout))
+
+        @all_requests
+        def success_handler(url, request):
+            return "Success"
+
+        with CustomFailureMock(_fake_new_conn):
+            url = "http://pyhystrixtest123.com"
+            # Open the circuit
+            try:
+                requests.get(url, retries=CONFIG.cb_fail_threshold+2)
+            except ConnectionError:
+                pass
+            self.assertEqual(temp["retried"], CONFIG.cb_fail_threshold)
+
+            # Make circuit half open
+            for i in xrange(CONFIG.cb_alive_threshold):
+                requests.get(url)
+
+        with HTTMock(success_handler):
+            requests.get(url)
+
+        temp["retried"] = 0
+        with CustomFailureMock(_fake_new_conn):
+            try:
+                requests.get(url, retries=CONFIG.cb_fail_threshold+2)
+            except ConnectionError:
+                pass
+            self.assertEqual(temp["retried"], CONFIG.cb_fail_threshold)
+
+
+class TestBreaker(unittest.TestCase):
+    def setUp(self):
+        self.breaker = circuit_breaker.CircuitBreaker(
+            allowed_fails=DEFAULT_FAILS,
+            retry_time=DEFAULT_RETRY,
+            retry_after=DEFAULT_OPEN_CIRCUIT_THREASHOLD,
+            validation_func=None
+        )
+        self.breaker_with_validation = circuit_breaker.CircuitBreaker(
+            allowed_fails=DEFAULT_FAILS,
+            retry_time=DEFAULT_RETRY,
+            validation_func=validation_stub
+        )
+        self.breaker_with_allowed = circuit_breaker.CircuitBreaker(
+            allowed_exceptions=[AttributeError]
+        )
+        self.breaker_with_fail_exc = circuit_breaker.CircuitBreaker(
+            failure_exceptions=[KeyError]
+        )
+
+    def test_open_transition(self):
+        breaker = self.breaker
+        for i in range(DEFAULT_FAILS):
+            breaker._on_failure()
+        self.assertEqual(breaker._state, circuit_breaker.OPEN)
+        self.assertEqual(breaker._failure_count, DEFAULT_FAILS)
+
+    def test_success(self):
+        breaker = self.breaker
+        for i in range(DEFAULT_FAILS - 1):
+            breaker._on_failure()
+        self.assertEqual(breaker._state, circuit_breaker.CLOSED)
+        self.assertEqual(breaker._failure_count, DEFAULT_FAILS - 1)
+
+        breaker._on_success()
+        self.assertEqual(breaker._state, circuit_breaker.CLOSED)
+        self.assertEqual(breaker._failure_count, 0)
+
+    def test_half_open(self):
+        breaker = self.breaker
+        for i in range(DEFAULT_FAILS):
+            breaker._on_failure()
+        self.assertEqual(breaker._state, circuit_breaker.OPEN)
+
+        time.sleep(DEFAULT_RETRY)
+        breaker._check_state()
+        self.assertEqual(breaker._state, circuit_breaker.HALF_OPEN)
+
+    def test_open_threashold(self):
+        breaker = self.breaker
+        breaker._close()
+        for i in range(DEFAULT_FAILS):
+            breaker._on_failure()
+        self.assertEqual(breaker._state, circuit_breaker.OPEN)
+
+        for i in range(DEFAULT_OPEN_CIRCUIT_THREASHOLD):
+            try:
+                breaker._call(raises_something, KeyError())
+            except Exception:
+                pass
+        breaker._check_state()
+        self.assertEqual(breaker._state, circuit_breaker.HALF_OPEN)
+
+    def test_validation_func(self):
+        breaker = self.breaker_with_validation
+        fake_result = 0
+        breaker._parse_result(fake_result)
+        self.assertEqual(breaker._failure_count, 1)
+        # breaker should reset count upon success
+        fake_result = 1
+        breaker._parse_result(fake_result)
+        self.assertEqual(breaker._failure_count, 0)
+
+    def test_no_validation_func(self):
+        breaker = self.breaker
+        fake_result = 0
+        breaker._parse_result(fake_result)
+        self.assertEqual(breaker._failure_count, 0)
+        fake_result = 1
+        breaker._parse_result(fake_result)
+        self.assertEqual(breaker._failure_count, 0)
+
+    def test_parse_allowed_exc(self):
+        breaker = self.breaker_with_allowed
+        breaker._call(raises_something, KeyError())
+        self.assertEqual(breaker._failure_count, 1)
+        breaker._call(raises_something, AttributeError())
+        # not a success, but not a failure either
+        self.assertEqual(breaker._failure_count, 1)
+
+    def test_parse_failure_exc(self):
+        breaker = self.breaker_with_fail_exc
+        breaker._call(raises_something, KeyError())
+        self.assertEqual(breaker._failure_count, 1)
+        breaker._call(raises_something, AttributeError())
+        # not a success, but not a failure either
+        self.assertEqual(breaker._failure_count, 1)
+
+    def test_handles_child_exc(self):
+        class TestException(AttributeError):
+            pass
+        breaker = self.breaker_with_allowed
+        breaker._call(raises_something, TestException())
+        self.assertEqual(breaker._failure_count, 0)
+
+    def test_init_failure(self):
+        args = []
+        kwargs = {
+            "allowed_fails": DEFAULT_FAILS,
+            "retry_time": DEFAULT_RETRY,
+            "allowed_exceptions": [ValueError, AttributeError],
+            "failure_exceptions": [KeyError]
+        }
+        self.assertRaises(ValueError, circuit_breaker.CircuitBreaker, *args,
+                          **kwargs)
+
+
+if __name__ == '__main__':
+    unittest.main()
