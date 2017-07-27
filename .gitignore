@@ -1,0 +1,8 @@
+build
+*.bak
+go_*
+*.pyc
+*.so
+dist
+pyhystrix.egg-info
+.tox
