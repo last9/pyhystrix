@@ -41,7 +41,7 @@ setuptools.setup(
     author="Mohan Dutt",
     url="",
     version=get_version(),
-    py_modules=['pyhystrix', 'circuit_breaker'],
+    py_modules=['pyhystrix', 'circuit_breaker', 'config'],
     include_package_data=True,
     install_requires=dependencies,
     test_suite="tests"
