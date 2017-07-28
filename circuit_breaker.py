@@ -26,10 +26,7 @@ Example Use:
 import time
 import functools
 import threading
-import logging
-
-logger = logging.getLogger(__name__)
-logger.addHandler(logging.NullHandler())
+from config import logger
 
 CLOSED = 0
 OPEN = 1
@@ -70,6 +67,7 @@ class CircuitBreaker(object):
         self._retry_time = retry_time
         self._validation_func = validation_func
         self._lock = threading.Lock()
+        self._read_lock = threading.RLock()
         self._failure_count = 0
         self._open_circuit_failure_count = 0
         self._open_circuit_failure_threashold = retry_after
@@ -217,7 +215,7 @@ class CircuitBreaker(object):
                 self._close()
 
     def __repr__(self):
-        with self._lock:
+        with self._read_lock:
             return ("Circuit Breaker - state: {state} fails: {fails} allowed "
                     "fails: {allowed} retry time: {retry_time} retry after: "
                     "{retry_after} failed requests".format(

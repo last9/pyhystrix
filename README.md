@@ -5,7 +5,7 @@
 - Connection and Read timeouts
 - Retries on connection failure
 - Circuitbreaking
-- Adding unique reques-id in request header if not provided
+- Adding unique `x-request-id` in request header if not provided
 
 Usage
 -----
@@ -23,11 +23,11 @@ Default Configurations can be changed in 2 ways:
 
 1. Setting following env variables:
 	- `PHY_CONNECT_TIMEOUT` : connection timeout in sec
-	- `PHY_READ_TIMEOUT`: read timeout in sec
+	- `PHY_READ_TIMEOUT`: read timeout in seconds
 	- `PHY_MAX_RETRIES`: max number of retries for connection failure
-	- `PHY_CB_FAIL_THRESHOLD`: Number of failed requests after which circuit will be open and further requests on the same url will not be allowed.
-	- `PHY_CB_ALIVE_THRESHOLD`: Number of failed requests on open circuit to make it half_open (Described below)
-	- `PHY_CB_DELAY`: Number of sec after which open circuit will be half_open.
+	- `PHY_CIRCUIT_FAIL_THRESHOLD`: Number of failed requests after which circuit will be open and further requests on the same url will not be allowed.
+	- `PHY_CIRCUIT_ALIVE_THRESHOLD`: Number of failed requests on open circuit to make it half_open (Described below)
+	- `PHY_CIRCUIT_DELAY`: Number of seconds after which open circuit will be half_open.
 
 2. parameters in request itself:
 	- `retries`(int): overrides `PHY_MAX_RETRIES `
