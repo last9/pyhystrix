@@ -3,9 +3,13 @@ import unittest
 import time
 import requests
 import random
+import httplib
+from io import StringIO
 from urllib3.connection import HTTPConnection
+from urllib3.connectionpool import HTTPConnectionPool
 from urllib3.exceptions import ConnectTimeoutError
-from requests.exceptions import ConnectionError
+from urllib3.response import HTTPResponse
+from requests.exceptions import ConnectionError, RetryError
 from httmock import all_requests, HTTMock
 from uuid import uuid4
 
@@ -30,6 +34,13 @@ def generate_url():
     return "http://www.%s.com" % str(uuid4())
 
 
+HTTP_RESPONSE_STR = u"""HTTP/1.1 %s
+Date: Thu, Jul  3 15:27:54 2014
+Content-Type: text/xml; charset="utf-8"
+Connection: close
+Content-Length: 626"""
+
+
 class CustomFailureMock(object):
     """patching _new_conn method of HTTPConnection
     to mock real external http call.
@@ -38,12 +49,52 @@ class CustomFailureMock(object):
         self._func = func
 
     def __enter__(self):
-        self._real_new_conn = HTTPConnection._new_conn
+        self._real_func = HTTPConnection._new_conn
         HTTPConnection._new_conn = self._func
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        HTTPConnection._new_conn = self._real_new_conn
+        HTTPConnection._new_conn = self._real_func
+
+
+class FakeHttplibSocket(object):
+    """Fake `httplib.HTTPResponse` replacement."""
+
+    def __init__(self, response_string):
+        """Initialize new `FakeHttplibSocket`."""
+        self._buffer = StringIO(response_string)
+
+    def makefile(self, _mode, _other):
+        """Returns the socket's internal buffer."""
+        return self._buffer
+
+
+class CustomHTTPResponseMock(object):
+    """Patching urllib3.connectionpool.HTTPConnectionPool._make_request
+    to simulate http call and return HTTP_RESPONSE_STR with custom status code
+    and increase the try counter
+    """
+    def __init__(self, counter, status=200):
+        self._status = status
+        self._counter = counter
+
+    def __enter__(self):
+        status = self._status
+        counter = self._counter
+
+        def fake_make_request(self, conn, method, url, **kwargs):
+            counter["retried"] += 1
+            sock = FakeHttplibSocket(HTTP_RESPONSE_STR % status)
+            resp = httplib.HTTPResponse(sock)
+            resp.begin()
+            return resp
+
+        self._real_func = HTTPConnectionPool._make_request
+        HTTPConnectionPool._make_request = fake_make_request
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        HTTPConnectionPool._make_request = self._real_func
 
 
 class TestTimeouts(unittest.TestCase):
@@ -54,12 +105,13 @@ class TestTimeouts(unittest.TestCase):
         now = int(time.time())
         after = now
         try:
-            requests.get("http://google.com:488", retries=0)
+            requests.get("http://google.com:488", max_tries=0)
         except ConnectionError:
             after = int(time.time())
 
         time_diff = after - now
-        self.assertTrue(time_diff >= Config.connect_timeout())
+        self.assertTrue(time_diff in [Config.connect_timeout(),
+                                      Config.connect_timeout()+1])
 
 
 class TestRetry(unittest.TestCase):
@@ -97,7 +149,7 @@ class TestRetry(unittest.TestCase):
         with CustomFailureMock(_fake_new_conn):
             returnedError = None
             try:
-                requests.get(url, retries=retries)
+                requests.get(url, max_tries=retries)
             except ConnectionError:
                 returnedError = ConnectionError
             self.assertEqual(returnedError, ConnectionError)
@@ -116,7 +168,7 @@ class TestRetry(unittest.TestCase):
         with CustomFailureMock(_fake_new_conn):
             returnedError = None
             try:
-                requests.get(url, retries=retries)
+                requests.get(url, max_tries=retries)
             except ConnectionError:
                 returnedError = ConnectionError
             self.assertEqual(returnedError, ConnectionError)
@@ -133,7 +185,7 @@ class TestRetry(unittest.TestCase):
 
         with CustomFailureMock(_fake_new_conn):
             try:
-                requests.get(url, retries=retries)
+                requests.get(url, max_tries=retries)
             except KeyError:
                 pass
             self.assertEqual(temp["retried"], 0)
@@ -159,7 +211,7 @@ class TestCircuitBreaking(unittest.TestCase):
         with CustomFailureMock(_fake_new_conn):
             returnedError = None
             try:
-                requests.get(url, retries=retries)
+                requests.get(url, max_tries=retries)
             except ConnectionError:
                 returnedError = ConnectionError
             self.assertEqual(returnedError, ConnectionError)
@@ -171,7 +223,7 @@ class TestCircuitBreaking(unittest.TestCase):
         with CustomFailureMock(_fake_new_conn):
             returnedError = None
             try:
-                requests.get(url, retries=retries)
+                requests.get(url, max_tries=retries)
             except ConnectionError:
                 returnedError = ConnectionError
             self.assertEqual(returnedError, ConnectionError)
@@ -196,7 +248,7 @@ class TestCircuitBreaking(unittest.TestCase):
 
         with CustomFailureMock(_fake_new_conn):
             try:
-                requests.get(url, retries=retries)
+                requests.get(url, max_tries=retries)
             except ConnectionError:
                 pass
             self.assertEqual(temp["retried"], custom_threshold)
@@ -206,7 +258,7 @@ class TestCircuitBreaking(unittest.TestCase):
 
         with CustomFailureMock(_fake_new_conn):
             try:
-                requests.get(url, retries=retries)
+                requests.get(url, max_tries=retries)
             except ConnectionError:
                 pass
             self.assertEqual(temp["retried"], 1)
@@ -226,7 +278,7 @@ class TestCircuitBreaking(unittest.TestCase):
         with CustomFailureMock(_fake_new_conn):
             # Open the circuit
             try:
-                requests.get(url, retries=Config.cb_fail_threshold()+2)
+                requests.get(url, max_tries=Config.cb_fail_threshold()+2)
             except ConnectionError:
                 pass
             self.assertEqual(temp["retried"], Config.cb_fail_threshold())
@@ -272,7 +324,7 @@ class TestCircuitBreaking(unittest.TestCase):
         with CustomFailureMock(_fake_new_conn):
             # Open the circuit
             try:
-                requests.get(url, retries=Config.cb_fail_threshold()+2)
+                requests.get(url, max_tries=Config.cb_fail_threshold()+2)
             except ConnectionError:
                 pass
             self.assertEqual(temp["retried"], Config.cb_fail_threshold())
@@ -287,10 +339,46 @@ class TestCircuitBreaking(unittest.TestCase):
         temp["retried"] = 0
         with CustomFailureMock(_fake_new_conn):
             try:
-                requests.get(url, retries=Config.cb_fail_threshold()+2)
+                requests.get(url, max_tries=Config.cb_fail_threshold()+2)
             except ConnectionError:
                 pass
             self.assertEqual(temp["retried"], Config.cb_fail_threshold())
+
+    def test_retry_put_on_500(self):
+        counter = {"retried": 0}
+        url = generate_url()
+
+        with CustomHTTPResponseMock(counter, 500):
+            # Open the circuit
+            try:
+                requests.put(url, max_tries=Config.cb_fail_threshold()+2)
+            except RetryError:
+                pass
+            self.assertEqual(counter["retried"], Config.cb_fail_threshold())
+
+    def test_no_default_retry_on_put(self):
+        counter = {"retried": 0}
+        url = generate_url()
+
+        with CustomHTTPResponseMock(counter, 400):
+            # Open the circuit
+            try:
+                requests.put(url)
+            except RetryError:
+                pass
+            self.assertEqual(counter["retried"], 1)
+
+    def test_default_retry_on_get_500(self):
+        counter = {"retried": -1}
+        url = generate_url()
+
+        with CustomHTTPResponseMock(counter, 500):
+            # Open the circuit
+            try:
+                requests.get(url)
+            except RetryError:
+                pass
+            self.assertEqual(counter["retried"], Config.max_tries())
 
 
 class TestBreaker(unittest.TestCase):

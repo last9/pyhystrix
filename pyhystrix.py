@@ -15,6 +15,14 @@ from requests import Session
 from requests.adapters import HTTPAdapter
 from uuid import uuid4
 
+STATUS_FORCELIST = "status_forcelist"
+MAX_TRIES = "max_tries"
+METHOD_WHITELIST = "method_whitelist"
+BACKOFF_FACTOR = "backoff_factor"
+TIMEOUT = "timeout"
+X_REQUEST_ID = "x-request-id"
+HEADERS = "headers"
+
 
 class Breakers(object):
     """A singleton holding a dictionary of unique key(scheme+netloc+path) to
@@ -47,18 +55,33 @@ class Breakers(object):
                 return cls._breakers[key]
 
             logger.info("Creating new circuit for %s", url)
-            breaker = CircuitBreaker(allowed_fails=Config.cb_fail_threshold(),
-                                     retry_time=Config.cb_delay(),
-                                     retry_after=Config.cb_alive_threshold(),
-                                     failure_exceptions=Config.retriable_exceptions())
+            breaker = CircuitBreaker(
+                allowed_fails=Config.cb_fail_threshold(),
+                retry_time=Config.cb_delay(),
+                retry_after=Config.cb_alive_threshold(),
+                failure_exceptions=Config.retriable_exceptions())
+
             cls._breakers[key] = breaker
             return breaker
 
 
-def get_backoff_args(kwargs):
-    return {
-        "max_tries": kwargs.pop("retries", Config.max_tries())
+def get_backoff_args(kwargs, method):
+    """Generate backoff arguments"""
+    max_tries = kwargs.get(MAX_TRIES, None)
+    args = {
+        METHOD_WHITELIST: Config.method_whitelist(),
+        STATUS_FORCELIST: kwargs.pop(STATUS_FORCELIST,
+                                     Config.status_forcelist()),
+        BACKOFF_FACTOR: kwargs.pop(BACKOFF_FACTOR,
+                                   Config.backoff_factor()),
+        MAX_TRIES: kwargs.pop(MAX_TRIES, Config.max_tries())
     }
+
+    if max_tries and max_tries > 0:
+        args[METHOD_WHITELIST].append(method.upper())
+
+    args[METHOD_WHITELIST] = frozenset(args[METHOD_WHITELIST])
+    return args
 
 
 def get_timeouts(timeout=None):
@@ -73,11 +96,11 @@ def get_timeouts(timeout=None):
 def ensure_request_id(kwargs):
     """Ensures that a unique request-id is present in the request header.
     """
-    headers = kwargs.get("headers", {})
-    if headers.get("x-request-id"):
+    headers = kwargs.get(HEADERS, {})
+    if headers.get(X_REQUEST_ID):
         return
-    headers["x-request-id"] = str(uuid4())
-    kwargs["headers"] = headers
+    headers[X_REQUEST_ID] = str(uuid4())
+    kwargs[HEADERS] = headers
 
 
 def patch_pyhystrix(func):
@@ -102,11 +125,16 @@ def patch_pyhystrix(func):
                 return super(CustomRetry, self).is_exhausted()
 
         ensure_request_id(kwargs)
-        kwargs["timeout"] = get_timeouts(kwargs.pop("timeout", None))
-        bargs = get_backoff_args(kwargs)
-
-        adapter = HTTPAdapter(max_retries=CustomRetry(total=None,
-                                                      connect=bargs["max_tries"]))
+        kwargs[TIMEOUT] = get_timeouts(kwargs.pop(TIMEOUT, None))
+        bargs = get_backoff_args(kwargs, method)
+        adapter = HTTPAdapter(
+            max_retries=CustomRetry(total=bargs[MAX_TRIES],
+                                    connect=bargs[MAX_TRIES],
+                                    read=bargs[MAX_TRIES],
+                                    status=bargs[MAX_TRIES],
+                                    status_forcelist=bargs[STATUS_FORCELIST],
+                                    method_whitelist=bargs[METHOD_WHITELIST],
+                                    backoff_factor=bargs[BACKOFF_FACTOR]))
         s = Session()
         s.mount(url, adapter)
         resp = s.request(method=method, url=url, **kwargs)
@@ -123,6 +151,7 @@ def patch_requests():
     least code change at the caller side.
     """
     requests.api.request = patch_pyhystrix(requests.api.request)
+    logger.info("pyhystrix added to requests")
 
 
 def Init():
@@ -130,4 +159,3 @@ def Init():
     use this library.
     """
     patch_requests()
-    logger.info("pyhystrix added to requests")

@@ -8,19 +8,18 @@ import logging
 
 
 log_levels = {
-    "CRITICAL": logging.CRITICAL,
-    "ERROR": logging.ERROR,
-    "WARNING": logging.WARNING,
-    "INFO": logging.INFO,
-    "DEBUG": logging.DEBUG
+    logging.getLevelName(logging.CRITICAL): logging.CRITICAL,
+    logging.getLevelName(logging.ERROR): logging.ERROR,
+    logging.getLevelName(logging.WARNING): logging.WARNING,
+    logging.getLevelName(logging.INFO): logging.INFO,
+    logging.getLevelName(logging.DEBUG): logging.DEBUG
 }
 
 logger = logging.getLogger("pyhystrix")
 
-level = os.environ.get("PHY_LOG", "WARNING")
+level = os.environ.get("PHY_LOG")
 logger.setLevel(log_levels.get(level, logging.WARNING))
 logger.addHandler(logging.StreamHandler())
-
 
 
 class Config(object):
@@ -34,11 +33,23 @@ class Config(object):
 
     @staticmethod
     def max_tries():
-        return int(os.environ.get("PHY_MAX_RETRIES", 3))
+        return int(os.environ.get("PHY_MAX_TRIES", 3))
+
+    @staticmethod
+    def backoff_factor():
+        return float(os.environ.get("PHY_BACKOFF_FACTOR", 0.5))
 
     @staticmethod
     def retriable_exceptions():
         return (requests.exceptions.ConnectionError,)
+
+    @staticmethod
+    def method_whitelist():
+        return ['HEAD', 'GET']
+
+    @staticmethod
+    def status_forcelist():
+        return [500]
 
     @staticmethod
     def cb_fail_threshold():
