@@ -30,10 +30,6 @@ class Breaker(object):
     """
     _breakers = {}
     _lock = threading.Lock()
-    _cb_fail_threshold = Config.cb_fail_threshold()
-    _cb_delay = Config.cb_delay()
-    _cb_alive_threshold = Config.cb_alive_threshold()
-    _retriable_exceptions = Config.retriable_exceptions()
 
     @classmethod
     def get_key(cls, raw_url):
