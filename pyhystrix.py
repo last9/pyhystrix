@@ -24,7 +24,7 @@ X_REQUEST_ID = "x-request-id"
 HEADERS = "headers"
 
 
-class Breakers(object):
+class Breaker(object):
     """A singleton holding a dictionary of unique key(scheme+netloc+path) to
     a circuitbreaker object.
     """
@@ -110,7 +110,7 @@ def patch_pyhystrix(func):
     """
     def pyhystrix_wrapper(method, url, **kwargs):
         logger.info("[%s %s]" % (method, url))
-        circuit = Breakers.new(url)
+        circuit = Breaker.new(url)
         if circuit.is_open:
             logger.info("OPEN circuit for %s", url)
             circuit.increment_failure_count()
