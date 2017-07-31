@@ -27,6 +27,7 @@ import time
 import functools
 import threading
 from config import logger
+from requests.exceptions import ConnectionError
 
 CLOSED = 0
 OPEN = 1
@@ -93,7 +94,7 @@ class CircuitBreaker(object):
         open_time = time.time()
         self._half_open_time = open_time + self._retry_time
         self._open_circuit_failure_count = 0
-        logger.warning("Circuit breaker opened")
+        logger.info("Circuit breaker opened")
 
     def _close(self):
         '''Close circuit breaker and reset failure count'''
@@ -166,7 +167,7 @@ class CircuitBreaker(object):
             current_state = self._check_state()
             if current_state == OPEN:
                 self._open_circuit_failure_count += 1
-                return
+                raise ConnectionError("Open circuit")
             try:
                 result = func(*args, **kwargs)
             except self._allowed_exceptions as e:

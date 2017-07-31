@@ -11,6 +11,7 @@ from circuit_breaker import CircuitBreaker
 from config import Config, logger
 from urlparse import urlparse
 from urllib3 import Retry
+from requests.exceptions import ConnectionError
 from requests import Session
 from requests.adapters import HTTPAdapter
 from uuid import uuid4
@@ -22,6 +23,24 @@ BACKOFF_FACTOR = "backoff_factor"
 TIMEOUT = "timeout"
 X_REQUEST_ID = "x-request-id"
 HEADERS = "headers"
+
+
+# class CustomRetry(Retry):
+#     def __init__(self, **kw):
+#         self.circuit = kw.pop("circuit")
+#         print kw
+#         super(CustomRetry, self).__init__(**kw)
+
+#     def new(self, **kw):
+#         kw["circuit"] = self.circuit
+#         return CustomRetry(**kw)
+
+#     def is_exhausted(self):
+#         # Increment fail and then check the circuit
+#         self.circuit.mark_failure()
+#         if self.circuit.is_open:
+#             return True
+#         return super(CustomRetry, self).is_exhausted()
 
 
 class Breaker(object):
@@ -110,7 +129,7 @@ def patch_pyhystrix(func):
         if circuit.is_open:
             logger.info("OPEN circuit for %s", url)
             circuit.increment_failure_count()
-            return None
+            raise ConnectionError("Open Circuit")
 
         class CustomRetry(Retry):
             def is_exhausted(self):

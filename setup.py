@@ -2,6 +2,7 @@
 
 import os
 import setuptools
+from version import __version__
 
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -12,16 +13,6 @@ README_FILE = os.path.join(BASE_DIR, "README.md")
 # Get the long description from the README file
 with open(README_FILE) as f:
     long_description = f.read()
-
-
-def normalize(version):
-    return version.split()[-1].strip("\"'")
-
-
-def get_version():
-    with open(VERSION_FILE) as f:
-        version = next(line for line in f if line.startswith("__version__"))
-        return normalize(version)
 
 
 dependencies = [
@@ -39,8 +30,8 @@ setuptools.setup(
     description="",
     long_description=long_description,
     author="Mohan Dutt",
-    url="",
-    version=get_version(),
+    url="https://bitbucket.org/finaccelteam/pyhystrix",
+    version=__version__,
     py_modules=['pyhystrix', 'circuit_breaker', 'config'],
     include_package_data=True,
     install_requires=dependencies,
