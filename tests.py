@@ -118,7 +118,7 @@ class TestTimeouts(unittest.TestCase):
         try:
             requests.get("http://google.com:488", max_tries=0)
         except ConnectionError:
-            self.assertTrue(int(time.time()) - now in [timeout, timeout+1, timeout+2])
+            self.assertTrue(int(time.time()) - now in [timeout, timeout+1])
         else:
             raise Exception("Should have raised ConnectionError")
 
