@@ -25,24 +25,6 @@ X_REQUEST_ID = "x-request-id"
 HEADERS = "headers"
 
 
-# class CustomRetry(Retry):
-#     def __init__(self, **kw):
-#         self.circuit = kw.pop("circuit")
-#         print kw
-#         super(CustomRetry, self).__init__(**kw)
-
-#     def new(self, **kw):
-#         kw["circuit"] = self.circuit
-#         return CustomRetry(**kw)
-
-#     def is_exhausted(self):
-#         # Increment fail and then check the circuit
-#         self.circuit.mark_failure()
-#         if self.circuit.is_open:
-#             return True
-#         return super(CustomRetry, self).is_exhausted()
-
-
 class Breaker(object):
     """A singleton holding a dictionary of unique key(scheme+netloc+path) to
     a circuitbreaker object.
