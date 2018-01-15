@@ -1,3 +1,4 @@
+from __future__ import print_function
 import os
 import unittest
 import time
@@ -423,7 +424,7 @@ class TestLogger(unittest.TestCase):
             requests.get(url)
         except ConnectionError:
             pass
-        print self.handler.emit_count
+        print(self.handler.emit_count)
         self.assertTrue(self.handler.emit_count > 0)
 
     def tearDown(self):

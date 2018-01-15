@@ -30,9 +30,10 @@ setuptools.setup(
     description="",
     long_description=long_description,
     author="Mohan Dutt",
-    url="https://bitbucket.org/finaccelteam/pyhystrix",
+    author_email="mohan@oogway.in",
+    url="https://github.com/oogway/pyhystrix",
     version=__version__,
-    py_modules=['pyhystrix', 'circuit_breaker', 'config'],
+    py_modules=['pyhystrix', 'circuit_breaker', 'config', 'version'],
     include_package_data=True,
     install_requires=dependencies,
     test_suite="tests"

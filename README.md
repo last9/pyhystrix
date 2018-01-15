@@ -7,6 +7,13 @@
 - Circuitbreaking
 - Adding unique `x-request-id` in request header if not provided
 
+Installation
+------------
+
+```sh
+pip install pyhystrix
+```
+
 Usage
 -----
 Before making any request, just call `Init()`:
