@@ -7,11 +7,13 @@
 - Circuitbreaking
 - Adding unique `x-request-id` in request header if not provided
 
+**NOTE:**: 0.0.2 supports python2.7 and >= 0.0.3 supports python3 only.
+
 Installation
 ------------
 
 ```sh
-pip install pyhystrix
+pip3 install pyhystrix
 ```
 
 Usage

@@ -9,7 +9,7 @@ import requests
 import threading
 from circuit_breaker import CircuitBreaker
 from config import Config, logger
-from urlparse import urlparse
+from urllib.parse import urlparse
 from urllib3 import Retry
 from requests.exceptions import ConnectionError
 from requests import Session

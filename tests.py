@@ -4,9 +4,9 @@ import unittest
 import time
 import requests
 import random
-import httplib
+import http
 import logging
-from io import StringIO
+from io import BytesIO
 from urllib3.connection import HTTPConnection
 from urllib3.connectionpool import HTTPConnectionPool
 from urllib3.exceptions import ConnectTimeoutError
@@ -74,9 +74,9 @@ class FakeHttplibSocket(object):
 
     def __init__(self, response_string):
         """Initialize new `FakeHttplibSocket`."""
-        self._buffer = StringIO(response_string)
+        self._buffer = BytesIO(response_string.encode("iso-8859-1"))
 
-    def makefile(self, _mode, _other):
+    def makefile(self, _mode):
         """Returns the socket's internal buffer."""
         return self._buffer
 
@@ -97,7 +97,7 @@ class CustomHTTPResponseMock(object):
         def fake_make_request(self, conn, method, url, **kwargs):
             counter["retried"] += 1
             sock = FakeHttplibSocket(HTTP_RESPONSE_STR % status)
-            resp = httplib.HTTPResponse(sock)
+            resp = http.client.HTTPResponse(sock)
             resp.begin()
             return resp
 
@@ -119,7 +119,7 @@ class TestTimeouts(unittest.TestCase):
         try:
             requests.get("http://google.com:488", max_tries=0)
         except ConnectionError:
-            self.assertTrue(int(time.time()) - now in [timeout, timeout+1])
+            self.assertTrue(int(time.time()) - now >= timeout)
         else:
             raise Exception("Should have raised ConnectionError")
 
@@ -159,7 +159,7 @@ class TestRetry(unittest.TestCase):
             try:
                 requests.get(new_url(), max_tries=retries)
             except ConnectionError as e:
-                self.assertTrue(e.message != "Open Circuit")
+                self.assertTrue(str(e) != "Open Circuit")
             else:
                 raise Exception("Should have raised ConnectionError")
         self.assertEqual(temp["retried"], retries)
@@ -176,7 +176,7 @@ class TestRetry(unittest.TestCase):
             try:
                 requests.get(new_url(), max_tries=0)
             except ConnectionError as e:
-                self.assertTrue(e.message != "Open Circuit")
+                self.assertTrue(str(e) != "Open Circuit")
             else:
                 raise Exception("Should have raised ConnectionError")
         self.assertEqual(temp["retried"], 0)
@@ -216,7 +216,7 @@ class TestCircuitBreaking(unittest.TestCase):
             try:
                 requests.get(url, max_tries=retries)
             except ConnectionError as e:
-                self.assertTrue(e.message != "Open Circuit")
+                self.assertTrue(str(e) != "Open Circuit")
             else:
                 raise Exception("Should have raised ConnectionError")
         self.assertEqual(temp["retried"], cb_threshold)
@@ -224,7 +224,7 @@ class TestCircuitBreaking(unittest.TestCase):
         try:
             requests.get(url)
         except ConnectionError as e:
-            self.assertTrue(e.message, "Open Circuit")
+            self.assertTrue(str(e), "Open Circuit")
         else:
             raise Exception("Should have raised ConnectionError")
 
@@ -235,7 +235,7 @@ class TestCircuitBreaking(unittest.TestCase):
             try:
                 requests.get(url, max_tries=retries)
             except ConnectionError as e:
-                self.assertTrue(e.message != "Open Circuit")
+                self.assertTrue(str(e) != "Open Circuit")
             else:
                 raise Exception("Should have raised ConnectionError")
         self.assertEqual(temp["retried"], 1)
@@ -299,7 +299,7 @@ class TestCircuitBreaking(unittest.TestCase):
             temp["retried"] = 0
             # Make requests on open circuit till the alive_threshold is reached
             # and the circuit is half open
-            for i in xrange(Config.cb_alive_threshold()):
+            for i in range(Config.cb_alive_threshold()):
                 try:
                     requests.get(url)
                 except ConnectionError:
@@ -347,7 +347,7 @@ class TestCircuitBreaking(unittest.TestCase):
             self.assertEqual(temp["retried"], cb_threshold)
 
             # Make circuit half open
-            for i in xrange(Config.cb_alive_threshold()):
+            for i in range(Config.cb_alive_threshold()):
                 try:
                     requests.get(url)
                 except ConnectionError:
