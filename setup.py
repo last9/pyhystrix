@@ -29,6 +29,7 @@ setuptools.setup(
     name="pyhystrix",
     description="",
     long_description=long_description,
+    long_description_content_type="text/markdown",
     author="Mohan Dutt",
     author_email="mohan@oogway.in",
     url="https://github.com/oogway/pyhystrix",
