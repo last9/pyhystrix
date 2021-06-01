@@ -21,7 +21,7 @@ dependencies = [
     "httmock == 1.2.6",
     "idna == 2.5",
     "requests == 2.22.0",
-    "urllib3 == 1.25.6"
+    "urllib3 == 1.26.5"
 ]
 
 
