@@ -16,7 +16,7 @@ with open(README_FILE) as f:
 
 
 dependencies = [
-    "certifi == 2017.4.17",
+    "certifi == 2022.12.7",
     "chardet == 3.0.4",
     "httmock == 1.2.6",
     "idna == 2.5",
